@@ -1,61 +1,69 @@
+import streamlit as st
 import cv2
-from cvzone.HandTrackingModule import HandDetector
-from cvzone.ClassificationModule import Classifier
 import numpy as np
-import math
+from keras.models import load_model
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+from kafka import KafkaProducer
+import json
 
-cap = cv2.VideoCapture(0)
-detector = HandDetector(maxHands=1)
-classifier = Classifier("Model/keras_model.h5" , "Model/labels.txt")
-offset = 20
-imgSize = 300
-counter = 0
+# Load model
+model = load_model("Model/keras_model.h5")
 
-labels = ["1", "2", "3", "Heart", "Ok", "SOS", "ThankYou"]
+# Kafka Producer
+producer = KafkaProducer(
+    bootstrap_servers='localhost:9092',
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
+
+labels = ["1", "2", "3", "Heart", "Ok", "SOS", "thankYou"]
 
 
-while True:
-    success, img = cap.read()
-    imgOutput = img.copy()
-    hands, img = detector.findHands(img)
-    if hands:
-        hand = hands[0]
-        x, y, w, h = hand['bbox']
+class GestureProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.prev_pred = ""
 
-        imgWhite = np.ones((imgSize, imgSize, 3), np.uint8)*255
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
 
-        imgCrop = img[y-offset:y + h + offset, x-offset:x + w + offset]
-        imgCropShape = imgCrop.shape
+        # Resize for faster processing
+        img = cv2.resize(img, (640, 480))
 
-        aspectRatio = h / w
+        # Dummy crop (replace with hand detection later)
+        h, w, _ = img.shape
+        imgCrop = img[100:400, 150:450]
 
-        if aspectRatio > 1:
-            k = imgSize / h
-            wCal = math.ceil(k * w)
-            imgResize = cv2.resize(imgCrop, (wCal, imgSize))
-            imgResizeShape = imgResize.shape
-            wGap = math.ceil((imgSize-wCal)/2)
-            imgWhite[:, wGap: wCal + wGap] = imgResize
-            prediction , index = classifier.getPrediction(imgWhite, draw= False)
-            print(prediction, index)
+        try:
+            # Resize to model input
+            imgInput = cv2.resize(imgCrop, (224, 224))
+            imgInput = imgInput / 255.0
+            imgInput = np.reshape(imgInput, (1, 224, 224, 3))
 
-        else:
-            k = imgSize / w
-            hCal = math.ceil(k * h)
-            imgResize = cv2.resize(imgCrop, (imgSize, hCal))
-            imgResizeShape = imgResize.shape
-            hGap = math.ceil((imgSize - hCal) / 2)
-            imgWhite[hGap: hCal + hGap, :] = imgResize
-            prediction , index = classifier.getPrediction(imgWhite, draw= False)
+            preds = model.predict(imgInput, verbose=0)
+            classIndex = np.argmax(preds)
+            confidence = np.max(preds)
 
-       
-        cv2.rectangle(imgOutput,(x-offset,y-offset-70),(x -offset+400, y - offset+60-50),(0,255,0),cv2.FILLED)  
+            if confidence > 0.8:
+                label = labels[classIndex]
 
-        cv2.putText(imgOutput,labels[index],(x,y-30),cv2.FONT_HERSHEY_COMPLEX,2,(0,0,0),2) 
-        cv2.rectangle(imgOutput,(x-offset,y-offset),(x + w + offset, y+h + offset),(0,255,0),4)   
+                # Send to Kafka
+                producer.send("gestures", {"gesture": label})
 
-        cv2.imshow('ImageCrop', imgCrop)
-        cv2.imshow('ImageWhite', imgWhite)
+                self.prev_pred = label
 
-    cv2.imshow('Image', imgOutput)
-    cv2.waitKey(1)
+                cv2.putText(img, f"{label} ({confidence:.2f})",
+                            (50, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (0, 255, 0), 2)
+
+        except:
+            pass
+
+        return img
+
+
+st.title("Gesture Recognition Dashboard")
+
+webrtc_streamer(
+    key="gesture",
+    video_processor_factory=GestureProcessor
+)

@@ -1,10 +1,8 @@
-TensorFlow → 2.15.0
-MediaPipe → 0.10.13
-cvzone → 1.6.1
-NumPy → 1.26.4
-OpenCV → 4.9.0.80
-protobuf 4.25.9
-
-git add .
-git commit -m "Message"
-git push origin main
+tensorflow==2.15.0
+mediapipe==0.10.13
+cvzone==1.6.1
+numpy==1.26.4
+opencv-python==4.9.0.80
+protobuf==4.25.9
+kafka-python
+streamlit
