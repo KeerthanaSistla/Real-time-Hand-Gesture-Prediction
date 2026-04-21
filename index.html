@@ -1,39 +1,136 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Gesture Recognition</title>
+    <title>Gesture AI System</title>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial;
+            background: #0f172a;
+            color: white;
+            text-align: center;
+        }
+
+        h1 {
+            color: #38bdf8;
+            margin-top: 15px;
+        }
+
+        .container {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 20px;
+        }
+
+        video {
+            border-radius: 15px;
+            border: 3px solid #38bdf8;
+        }
+
+        .panel {
+            width: 380px;
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: left;
+        }
+
+        .gesture {
+            font-size: 26px;
+            color: #22c55e;
+            margin-bottom: 10px;
+        }
+
+        .confidence {
+            margin-bottom: 20px;
+        }
+
+        .bar {
+            margin-bottom: 10px;
+        }
+
+        .label {
+            font-size: 13px;
+        }
+
+        .bg {
+            background: #334155;
+            height: 8px;
+            border-radius: 5px;
+        }
+
+        .fill {
+            height: 8px;
+            background: #38bdf8;
+            width: 0%;
+            border-radius: 5px;
+        }
+    </style>
 </head>
+
 <body>
 
-<h2>Gesture Recognition</h2>
+<h1>🤖 Gesture Recognition AI</h1>
 
-<video id="video" width="400" autoplay></video>
-<canvas id="canvas" style="display:none;"></canvas>
+<div class="container">
 
-<h3 id="result">Waiting...</h3>
+    <div>
+        <video id="video" width="500" autoplay></video>
+        <canvas id="canvas" style="display:none;"></canvas>
+    </div>
+
+    <div class="panel">
+        <div class="gesture" id="gesture">Waiting...</div>
+        <div class="confidence" id="confidence">--</div>
+
+        <div id="bars"></div>
+    </div>
+
+</div>
 
 <script>
+
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-const result = document.getElementById("result");
 
-// Start camera
+const gesture = document.getElementById("gesture");
+const confidence = document.getElementById("confidence");
+const bars = document.getElementById("bars");
+
 navigator.mediaDevices.getUserMedia({ video: true })
 .then(stream => {
     video.srcObject = stream;
-})
-.catch(err => {
-    alert("Camera access denied!");
 });
 
-// Send frame every 1 second
+let busy = false;
+
 setInterval(() => {
+
+    if (busy) return;
+
+    // 🚨 FIX 1: ensure video is ready
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+        return;
+    }
+
+    busy = true;
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
+
     ctx.drawImage(video, 0, 0);
 
-    canvas.toBlob(blob => {
+    canvas.toBlob((blob) => {
+
+        // 🚨 FIX 2: safety check
+        if (!blob) {
+            busy = false;
+            return;
+        }
+
         const formData = new FormData();
         formData.append("image", blob, "frame.jpg");
 
@@ -43,17 +140,37 @@ setInterval(() => {
         })
         .then(res => res.json())
         .then(data => {
-            result.innerText = 
-                "Gesture: " + data.gesture + 
-                " | Confidence: " + (data.confidence * 100).toFixed(2) + "%";
+
+            gesture.innerText = "Gesture: " + data.gesture;
+            confidence.innerText = "Confidence: " + data.confidence.toFixed(2) + "%";
+
+            bars.innerHTML = "";
+
+            for (let key in data.probabilities) {
+
+                let val = data.probabilities[key];
+
+                let div = document.createElement("div");
+                div.className = "bar";
+
+                div.innerHTML = `
+                    <div class="label">${key} - ${val.toFixed(2)}%</div>
+                    <div class="bg">
+                        <div class="fill" style="width:${val}%"></div>
+                    </div>
+                `;
+
+                bars.appendChild(div);
+            }
+
         })
-        .catch(err => {
-            console.error(err);
-        });
+        .catch(console.error)
+        .finally(() => busy = false);
 
     }, "image/jpeg");
 
 }, 1000);
+
 </script>
 
 </body>
