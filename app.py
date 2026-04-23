@@ -8,8 +8,8 @@ import json
 from tensorflow.keras.models import load_model
 from cvzone.HandTrackingModule import HandDetector
 
-# Kafka
 from kafka import KafkaProducer
+import serial
 
 app = Flask(__name__)
 
@@ -17,18 +17,17 @@ app = Flask(__name__)
 # LOAD MODEL
 # =========================
 model = load_model("Model/keras_model.h5")
-
 labels = ["1", "2", "3", "Heart", "Ok", "SOS", "thankYou"]
 
 # =========================
-# HAND DETECTOR SETTINGS
+# HAND DETECTOR
 # =========================
 detector = HandDetector(maxHands=1)
 offset = 20
 imgSize = 300
 
 # =========================
-# KAFKA PRODUCER SETUP
+# KAFKA PRODUCER
 # =========================
 try:
     producer = KafkaProducer(
@@ -36,10 +35,21 @@ try:
         value_serializer=lambda v: json.dumps(v).encode('utf-8'),
         linger_ms=10
     )
-    print("✅ Kafka Producer Connected")
+    print("✅ Kafka Connected")
 except Exception as e:
     producer = None
     print("⚠️ Kafka not connected:", e)
+
+# =========================
+# ARDUINO (COM17)
+# =========================
+try:
+    arduino = serial.Serial('COM17', 9600, timeout=1)
+    time.sleep(2)
+    print("✅ Arduino Connected on COM17")
+except Exception as e:
+    arduino = None
+    print("⚠️ Arduino not connected:", e)
 
 
 # =========================
@@ -75,11 +85,10 @@ def predict():
             "probabilities": {}
         })
 
-    hand = hands[0]
-    x, y, w, h = hand['bbox']
+    x, y, w, h = hands[0]['bbox']
 
     # =========================
-    # CREATE WHITE BACKGROUND
+    # PREPROCESSING
     # =========================
     imgWhite = np.ones((imgSize, imgSize, 3), np.uint8) * 255
 
@@ -90,9 +99,6 @@ def predict():
 
     aspectRatio = h / w
 
-    # =========================
-    # RESIZE (SAME AS TRAINING)
-    # =========================
     if aspectRatio > 1:
         k = imgSize / h
         wCal = math.ceil(k * w)
@@ -107,7 +113,7 @@ def predict():
         imgWhite[hGap:hCal + hGap, :] = imgResize
 
     # =========================
-    # MODEL PREDICTION
+    # PREDICTION
     # =========================
     imgInput = cv2.resize(imgWhite, (224, 224))
     imgInput = imgInput.astype(np.float32) / 255.0
@@ -117,11 +123,10 @@ def predict():
 
     class_id = int(np.argmax(preds))
     confidence = float(np.max(preds))
-
     gesture = labels[class_id]
 
     # =========================
-    # SEND TO KAFKA
+    # KAFKA SEND
     # =========================
     if producer:
         try:
@@ -131,7 +136,17 @@ def predict():
                 "timestamp": time.time()
             })
         except Exception as e:
-            print("Kafka Send Error:", e)
+            print("Kafka Error:", e)
+
+    # =========================
+    # ARDUINO SEND (COM17)
+    # =========================
+    if arduino:
+        try:
+            msg = f"{gesture}:{confidence*100:.1f}\n"
+            arduino.write(msg.encode())
+        except Exception as e:
+            print("Arduino Error:", e)
 
     # =========================
     # RESPONSE
@@ -149,4 +164,4 @@ def predict():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False, use_reloader=False)
