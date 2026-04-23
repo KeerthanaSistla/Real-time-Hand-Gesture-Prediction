@@ -2,24 +2,49 @@ from flask import Flask, request, jsonify, send_from_directory
 import numpy as np
 import cv2
 import math
+import time
+import json
+
 from tensorflow.keras.models import load_model
 from cvzone.HandTrackingModule import HandDetector
 
+# Kafka
+from kafka import KafkaProducer
+
 app = Flask(__name__)
 
-# Load model once
+# =========================
+# LOAD MODEL
+# =========================
 model = load_model("Model/keras_model.h5")
 
 labels = ["1", "2", "3", "Heart", "Ok", "SOS", "thankYou"]
 
 # =========================
-# SAME SETTINGS AS TRAINING
+# HAND DETECTOR SETTINGS
 # =========================
 detector = HandDetector(maxHands=1)
 offset = 20
 imgSize = 300
 
+# =========================
+# KAFKA PRODUCER SETUP
+# =========================
+try:
+    producer = KafkaProducer(
+        bootstrap_servers='172.29.110.220',
+        value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+        linger_ms=10
+    )
+    print("✅ Kafka Producer Connected")
+except Exception as e:
+    producer = None
+    print("⚠️ Kafka not connected:", e)
 
+
+# =========================
+# ROUTES
+# =========================
 @app.route("/")
 def home():
     return send_from_directory(".", "index.html")
@@ -27,6 +52,7 @@ def home():
 
 @app.route("/predict", methods=["POST"])
 def predict():
+
     if "image" not in request.files:
         return jsonify({"error": "No image received"}), 400
 
@@ -38,7 +64,7 @@ def predict():
     )
 
     # =========================
-    # STEP 1: HAND DETECTION
+    # HAND DETECTION
     # =========================
     hands, img = detector.findHands(img)
 
@@ -53,11 +79,10 @@ def predict():
     x, y, w, h = hand['bbox']
 
     # =========================
-    # STEP 2: WHITE CANVAS
+    # CREATE WHITE BACKGROUND
     # =========================
     imgWhite = np.ones((imgSize, imgSize, 3), np.uint8) * 255
 
-    # crop hand region safely
     imgCrop = img[
         max(0, y - offset):y + h + offset,
         max(0, x - offset):x + w + offset
@@ -66,7 +91,7 @@ def predict():
     aspectRatio = h / w
 
     # =========================
-    # STEP 3: RESIZE LIKE TRAINING
+    # RESIZE (SAME AS TRAINING)
     # =========================
     if aspectRatio > 1:
         k = imgSize / h
@@ -82,7 +107,7 @@ def predict():
         imgWhite[hGap:hCal + hGap, :] = imgResize
 
     # =========================
-    # STEP 4: MODEL INPUT
+    # MODEL PREDICTION
     # =========================
     imgInput = cv2.resize(imgWhite, (224, 224))
     imgInput = imgInput.astype(np.float32) / 255.0
@@ -93,14 +118,31 @@ def predict():
     class_id = int(np.argmax(preds))
     confidence = float(np.max(preds))
 
-    # full probability map
+    gesture = labels[class_id]
+
+    # =========================
+    # SEND TO KAFKA
+    # =========================
+    if producer:
+        try:
+            producer.send("gesture_topic", {
+                "gesture": gesture,
+                "confidence": confidence * 100,
+                "timestamp": time.time()
+            })
+        except Exception as e:
+            print("Kafka Send Error:", e)
+
+    # =========================
+    # RESPONSE
+    # =========================
     probabilities = {
         labels[i]: float(preds[i]) * 100
         for i in range(len(labels))
     }
 
     return jsonify({
-        "gesture": labels[class_id],
+        "gesture": gesture,
         "confidence": confidence * 100,
         "probabilities": probabilities
     })
