@@ -11,6 +11,8 @@ from cvzone.HandTrackingModule import HandDetector
 from kafka import KafkaProducer
 import serial
 
+import os
+
 app = Flask(__name__)
 
 # =========================
@@ -31,7 +33,7 @@ imgSize = 300
 # =========================
 try:
     producer = KafkaProducer(
-        bootstrap_servers='172.29.110.220',
+        bootstrap_servers='localhost:9092',
         value_serializer=lambda v: json.dumps(v).encode('utf-8'),
         linger_ms=10
     )
@@ -39,6 +41,18 @@ try:
 except Exception as e:
     producer = None
     print("⚠️ Kafka not connected:", e)
+
+# SPARK
+
+@app.route("/analytics")
+def analytics():
+    if not os.path.exists("analytics.json"):
+        return jsonify([])
+
+    with open("analytics.json", "r") as f:
+        data = json.load(f)
+
+    return jsonify(data)
 
 # =========================
 # ARDUINO (COM17)

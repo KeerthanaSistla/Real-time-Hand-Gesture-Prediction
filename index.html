@@ -91,7 +91,6 @@
 </div>
 
 <script>
-
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -100,6 +99,12 @@ const gesture = document.getElementById("gesture");
 const confidence = document.getElementById("confidence");
 const bars = document.getElementById("bars");
 
+// NEW analytics div
+const analyticsDiv = document.createElement("div");
+analyticsDiv.style.marginTop = "20px";
+document.querySelector(".panel").appendChild(analyticsDiv);
+
+// CAMERA
 navigator.mediaDevices.getUserMedia({ video: true })
 .then(stream => {
     video.srcObject = stream;
@@ -107,14 +112,13 @@ navigator.mediaDevices.getUserMedia({ video: true })
 
 let busy = false;
 
+// =========================
+// PREDICTION LOOP
+// =========================
 setInterval(() => {
 
     if (busy) return;
-
-    // 🚨 FIX 1: ensure video is ready
-    if (video.videoWidth === 0 || video.videoHeight === 0) {
-        return;
-    }
+    if (video.videoWidth === 0) return;
 
     busy = true;
 
@@ -125,7 +129,6 @@ setInterval(() => {
 
     canvas.toBlob((blob) => {
 
-        // 🚨 FIX 2: safety check
         if (!blob) {
             busy = false;
             return;
@@ -147,7 +150,6 @@ setInterval(() => {
             bars.innerHTML = "";
 
             for (let key in data.probabilities) {
-
                 let val = data.probabilities[key];
 
                 let div = document.createElement("div");
@@ -164,13 +166,49 @@ setInterval(() => {
             }
 
         })
-        .catch(console.error)
         .finally(() => busy = false);
 
     }, "image/jpeg");
 
 }, 1000);
 
+
+// =========================
+// ANALYTICS LOOP (SPARK)
+// =========================
+setInterval(() => {
+
+    fetch("/analytics")
+    .then(res => res.json())
+    .then(data => {
+
+        analyticsDiv.innerHTML = "<h3>📊 Live Analytics (Spark)</h3>";
+
+        let counts = {};
+
+        data.forEach(item => {
+            counts[item.gesture] = item.count;
+        });
+
+        for (let key in counts) {
+
+            let val = counts[key];
+
+            let p = document.createElement("p");
+            p.innerText = `${key} → ${val}`;
+
+            // 🚨 SOS ALERT
+            if (key === "SOS" && val > 0) {
+                p.style.color = "red";
+                p.innerText += " 🚨 ALERT!";
+            }
+
+            analyticsDiv.appendChild(p);
+        }
+
+    });
+
+}, 2000);
 </script>
 
 </body>

@@ -1,21 +1,27 @@
-from kafka import KafkaProducer
 import json
+import time
+import random
+from kafka import KafkaProducer
 
-class GestureProducer:
-    def __init__(self):
-        self.producer = KafkaProducer(
-            bootstrap_servers='localhost:9092',
-            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-            linger_ms=10
-        )
+producer = KafkaProducer(
+    bootstrap_servers='localhost:9092',
+    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+)
 
-    def send_gesture(self, gesture, confidence):
-        data = {
-            "gesture": gesture,
-            "confidence": float(confidence)
-        }
+topic = "gesture_topic"
 
-        try:
-            self.producer.send("gesture_topic", value=data)
-        except Exception as e:
-            print("Kafka Error:", e)
+gestures = ["1", "2", "3", "Heart", "Ok", "SOS", "ThankYou"]
+
+print("Sending gesture data to Kafka...")
+
+while True:
+    data = {
+        "gesture": random.choice(gestures),
+        "confidence": round(random.uniform(0.7, 0.99), 2),
+        "timestamp": time.time()
+    }
+
+    producer.send(topic, value=data)
+    print("Sent:", data)
+
+    time.sleep(1)
